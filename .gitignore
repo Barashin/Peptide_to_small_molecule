@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 仮想環境
+venv/
+.venv/
+env/
+
+# macOS
+.DS_Store
+*.swp
+
+# 生成ファイル (実行後に生成されるため除外)
+results/
+candidate_ligands.sdf
+
+# Claude Code 設定
+.claude/
+
+# ADCP/ADFR 実行時の一時ファイル
+AdcpTmpDir/
+*.trg
+*.dlg
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# エディタ
+.vscode/
+.idea/
