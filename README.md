@@ -113,11 +113,17 @@ python collect_best.py
 > **LE** (Ligand Efficiency) = |スコア| / 重原子数。0.3 以上が良好。
 > **SA Score** = 合成容易性。1 (容易) 〜 10 (困難)。
 
-### 環状ペプチド vs 設計低分子 — 結合親和性比較
+### 環状ペプチド vs 設計低分子 — 結合親和性比較 (smina)
 
-元の環状ペプチド (cyclo-GEVDGWATPD) と設計低分子のドッキングスコアを比較します。低分子は原子数が少ないにもかかわらず、環状ペプチドに匹敵する結合スコアを示しています。
+同じスコアリング関数 (smina / Vina スコア) で環状ペプチドと設計低分子を比較します。低分子は原子数が約 1/3 にもかかわらず、環状ペプチドに匹敵する結合スコアを示しています。
 
-![結合親和性比較](docs/images/binding_comparison.png)
+![結合親和性比較 smina](docs/images/binding_comparison.png)
+
+### ADCP (環状ペプチド専用) vs smina (低分子) — 参考比較
+
+ADCP (AutoDock CrankPep) は環状ペプチド専用のドッキングエンジンです。smina とはスコアリング関数が異なるため数値の直接比較はできませんが、それぞれの得意分野でのスコアを並べて参考にできます。
+
+![ADCP vs smina](docs/images/adcp_vs_smina_comparison.png)
 
 ### 合成スキーム図 (AiZynthFinder)
 
