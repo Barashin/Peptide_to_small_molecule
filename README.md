@@ -113,6 +113,12 @@ python collect_best.py
 > **LE** (Ligand Efficiency) = |スコア| / 重原子数。0.3 以上が良好。
 > **SA Score** = 合成容易性。1 (容易) 〜 10 (困難)。
 
+### 環状ペプチド vs 設計低分子 — 結合親和性比較
+
+元の環状ペプチド (cyclo-GEVDGWATPD) と設計低分子のドッキングスコアを比較します。低分子は原子数が少ないにもかかわらず、環状ペプチドに匹敵する結合スコアを示しています。
+
+![結合親和性比較](docs/images/binding_comparison.png)
+
 ### 合成スキーム図 (AiZynthFinder)
 
 AI が提案した前向き合成ルートの例です (1 位の分子、7 ステップ)。
