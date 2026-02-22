@@ -78,6 +78,49 @@ python collect_best.py
 
 ---
 
+## 5. アウトプット例
+
+サンプル PDB (`Protein_Peptide.pdb`) での実行結果です。
+
+### 相互作用解析 — 残基重要度ランキング
+
+ペプチドの各残基がタンパク質との結合にどれだけ重要かをスコア化します。
+
+![残基重要度](docs/images/residue_scores.png)
+
+### 相互作用マップ
+
+ペプチド残基とタンパク質残基の接触数をヒートマップで表示します。
+
+![相互作用マップ](docs/images/interaction_map.png)
+
+### ドッキングスコア
+
+設計された候補分子のドッキングスコア (kcal/mol) の比較です。値が小さいほど結合が強いことを示します。
+
+![ドッキングスコア](docs/images/docking_scores.png)
+
+### 上位 5 候補 (Result_Best)
+
+| 順位 | 分子名 | スコア (kcal/mol) | LE | SA Score |
+|:---:|--------|:---:|:---:|:---:|
+| 1 | reduced_peptide_TRP_ALA_PRO_direct | -7.4 | 0.28 | 3.99 |
+| 2 | direct_link_TRP_ALA_PRO | -6.1 | 0.38 | 3.88 |
+| 3 | benzene_tri_TRP_ALA_PRO | -6.1 | 0.28 | 5.58 |
+| 4 | direct_link_TRP_ALA_direct | -6.0 | 0.55 | 1.88 |
+| 5 | reduced_peptide_TRP_ALA_PRO_C4 | -5.8 | 0.17 | 3.92 |
+
+> **LE** (Ligand Efficiency) = |スコア| / 重原子数。0.3 以上が良好。
+> **SA Score** = 合成容易性。1 (容易) 〜 10 (困難)。
+
+### 合成スキーム図 (AiZynthFinder)
+
+AI が提案した前向き合成ルートの例です (1 位の分子、7 ステップ)。
+
+![合成スキーム例](docs/images/synthesis_example.png)
+
+---
+
 ## ライセンス
 
 MIT License
