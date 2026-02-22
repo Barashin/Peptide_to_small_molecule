@@ -57,6 +57,16 @@ def parse_args():
     p.add_argument("--skip-rescore",     action="store_true")
     p.add_argument("--skip-sasa",        action="store_true")
     p.add_argument("--skip-prodigy",     action="store_true")
+    p.add_argument("--sa-threshold",     type=float, default=6.0,
+                   help="SA Score 合成容易性閾値 (default: 6.0)")
+    p.add_argument("--skip-synth-filter", action="store_true",
+                   help="合成容易性フィルタをスキップ")
+    p.add_argument("--skip-rigid-scaffold", action="store_true",
+                   help="剛直スキャフォールドブリッジ設計をスキップ")
+    p.add_argument("--use-aizynthfinder", action="store_true",
+                   help="AiZynthFinder を使った AI ベース逆合成")
+    p.add_argument("--aizynthfinder-config", type=str, default="",
+                   help="AiZynthFinder config.yml のパス")
     return p.parse_args()
 
 
@@ -177,10 +187,42 @@ def main():
     selected   = select_key_residues(scores, top_n=args.top_residues)
     print(f"  選択残基: {[(n, name, f'{sc:.1f}pt') for n, name, sc in selected]}")
     candidates = build_peptidomimetic(selected)
+
+    # ──────────────────────────────────────────
+    # STEP 3b: 合成容易性・構造アラート評価
+    # ──────────────────────────────────────────
+    if not args.skip_synth_filter:
+        print("\n[STEP 3b] 合成容易性・構造アラート評価...")
+        try:
+            from synthesizability import enrich_candidates
+            enrich_candidates(candidates)
+        except ImportError:
+            print("  [警告] synthesizability モジュールが利用できません。スキップします。")
+
     print_candidates(candidates)
 
     sdf_path = os.path.join(args.output_dir, "candidate_ligands.sdf")
     save_candidates_sdf(candidates, sdf_path)
+
+    # ──────────────────────────────────────────
+    # STEP 3c: 逆合成解析
+    # ──────────────────────────────────────────
+    if not args.skip_synth_filter:
+        print("\n[STEP 3c] 逆合成解析...")
+        try:
+            from retrosynthesis import batch_retrosynthesis, \
+                save_retrosynthesis_report, save_retrosynthesis_csv
+            retro_results = batch_retrosynthesis(
+                candidates, verbose=True,
+                use_aizynthfinder=args.use_aizynthfinder,
+                aizynthfinder_config=args.aizynthfinder_config,
+            )
+            save_retrosynthesis_report(retro_results, args.output_dir)
+            save_retrosynthesis_csv(retro_results, args.output_dir)
+        except ImportError:
+            print("  [警告] retrosynthesis モジュールが利用できません。スキップします。")
+        except Exception as e:
+            print(f"  [警告] 逆合成解析エラー: {e}")
 
     # ──────────────────────────────────────────
     # STEP 4: 可視化
@@ -211,7 +253,12 @@ def main():
         "pharmacophore_count": len(features),
         "candidates": [
             {"name": c["name"], "smiles": c["smiles"],
-             **calculate_drug_likeness(c["mol"])}
+             **calculate_drug_likeness(c["mol"]),
+             "SA_Score": c.get("SA_Score"),
+             "QED": c.get("QED"),
+             "PAINS_OK": c.get("PAINS_OK"),
+             "BRENK_OK": c.get("BRENK_OK"),
+             "Synth_Pass": c.get("Synth_Pass")}
             for c in candidates
         ],
         "sasa": {
@@ -282,6 +329,32 @@ def main():
             json.dump(report, f, indent=2, ensure_ascii=False)
     else:
         print("\n[STEP 6] ドッキングをスキップ (--skip-docking)")
+
+    # ──────────────────────────────────────────
+    # STEP 7b: 剛直スキャフォールドブリッジ設計
+    # ──────────────────────────────────────────
+    if not args.skip_rigid_scaffold:
+        print("\n[STEP 7b] 剛直スキャフォールドブリッジ設計...")
+        try:
+            from rigid_scaffold_design import generate_rigid_bridges
+            rigid_dir = os.path.join(args.output_dir, "rigid_scaffold")
+            os.makedirs(rigid_dir, exist_ok=True)
+            for i in range(len(selected)):
+                for j in range(i + 1, len(selected)):
+                    res1 = f"{selected[i][1]}{selected[i][0]}"
+                    res2 = f"{selected[j][1]}{selected[j][0]}"
+                    rigid_results = generate_rigid_bridges(
+                        res1, res2,
+                        pdb_path=args.pdb,
+                        chain_id=args.peptide_chain,
+                        dock=not args.skip_docking,
+                        exhaustiveness=args.exhaustiveness,
+                    )
+                    print(f"  {res1}–{res2}: {len(rigid_results)} 分子生成")
+        except Exception as e:
+            print(f"  [警告] 剛直スキャフォールド設計でエラー: {e}")
+    else:
+        print("\n[STEP 7b] 剛直スキャフォールド設計をスキップ (--skip-rigid-scaffold)")
 
     print(f"\n{'='*60}")
     print("  パイプライン完了!")

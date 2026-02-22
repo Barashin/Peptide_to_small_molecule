@@ -14,15 +14,8 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-# アミノ酸分類
-HYDROPHOBIC_AA = {"ALA", "VAL", "ILE", "LEU", "MET", "PHE", "TRP", "PRO", "TYR"}
-POSITIVE_AA    = {"LYS", "ARG", "HIS"}
-NEGATIVE_AA    = {"ASP", "GLU"}
-POLAR_AA       = {"SER", "THR", "ASN", "GLN", "CYS", "TYR", "TRP"}
-
-# H結合供与体・受容体原子名
-HBOND_DONORS    = {"N", "ND1", "ND2", "NE", "NE1", "NE2", "NH1", "NH2", "NZ", "OG", "OG1", "OH"}
-HBOND_ACCEPTORS = {"O", "OD1", "OD2", "OE1", "OE2", "OG", "OG1", "OH", "NE2", "ND1"}
+from utils.residue_defs import (HYDROPHOBIC_AA, POSITIVE_AA, NEGATIVE_AA,
+                                POLAR_AA, HBOND_DONORS, HBOND_ACCEPTORS)
 
 
 def load_structure(pdb_path: str, model_id: int = 0):

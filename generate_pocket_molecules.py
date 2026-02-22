@@ -40,16 +40,7 @@ from rdkit.Chem import BRICS
 # ──────────────────────────────────────────
 # 残基タイプ定義
 # ──────────────────────────────────────────
-RES_TYPE = {
-    "LYS": "POS", "ARG": "POS", "HIS": "POS",
-    "ASP": "NEG", "GLU": "NEG",
-    "PHE": "ARO", "TYR": "ARO", "TRP": "ARO",
-    "LEU": "HYD", "ILE": "HYD", "VAL": "HYD",
-    "ALA": "HYD", "MET": "HYD", "PRO": "HYD",
-    "SER": "POL", "THR": "POL", "ASN": "POL",
-    "GLN": "POL", "CYS": "POL",
-    "GLY": "GLY",
-}
+from utils.residue_defs import RES_TYPE
 
 # タンパク質残基タイプ → 相補的リガンドフラグメント SMILES
 COMPLEMENTARY_FRAGMENTS = {
@@ -391,19 +382,9 @@ def generate_brics_molecules(seed_smiles: list, n_mols: int = 20) -> list:
 
 
 def calculate_props(mol) -> dict:
-    """分子プロパティ計算"""
-    return {
-        "MW"      : round(Descriptors.ExactMolWt(mol), 2),
-        "LogP"    : round(Descriptors.MolLogP(mol), 2),
-        "HBD"     : rdMolDescriptors.CalcNumHBD(mol),
-        "HBA"     : rdMolDescriptors.CalcNumHBA(mol),
-        "PSA"     : round(Descriptors.TPSA(mol), 2),
-        "RotBonds": rdMolDescriptors.CalcNumRotatableBonds(mol),
-        "Ro5"     : (Descriptors.ExactMolWt(mol) <= 500 and
-                     Descriptors.MolLogP(mol) <= 5 and
-                     rdMolDescriptors.CalcNumHBD(mol) <= 5 and
-                     rdMolDescriptors.CalcNumHBA(mol) <= 10),
-    }
+    """分子プロパティ計算 (utils.drug_likeness に委譲)"""
+    from utils.drug_likeness import calculate_drug_likeness
+    return calculate_drug_likeness(mol)
 
 
 def generate_3d(mol) -> Optional[object]:

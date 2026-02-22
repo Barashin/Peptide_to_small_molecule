@@ -234,6 +234,27 @@ def convert_sdf_to_pdbqt(mamba: str, sdf_path: Path,
         )
         r = run_in_adcpsuite(mamba, cmd, timeout=60)
 
+    # obabel は複数コンフォーマー(MODEL)を出力するが ADFR は単一モデルを期待。
+    # 最初の MODEL だけ抽出し、ENDMDL / MODEL 行を除去する。
+    if out_pdbqt.exists():
+        lines = out_pdbqt.read_text().splitlines()
+        first_model = []
+        in_first = True
+        model_count = 0
+        for l in lines:
+            if l.strip().startswith("MODEL"):
+                model_count += 1
+                if model_count > 1:
+                    in_first = False
+                continue  # MODEL 行自体は除去
+            if l.strip() == "ENDMDL":
+                if in_first:
+                    continue  # 除去
+                break  # 2番目以降のモデルは無視
+            if in_first:
+                first_model.append(l)
+        out_pdbqt.write_text("\n".join(first_model) + "\n")
+
     return out_pdbqt.exists()
 
 
@@ -245,10 +266,15 @@ def parse_dlg_file(dlg_file: Path) -> Tuple[float, float, int]:
     """
     AutoDock .dlg ファイルから affinity, best_energy, n_clusters を抽出。
 
-    フォーマット例:
+    ADFR 形式 (NoName*.dlg):
+        _Gen0044 Score: -44.972 LL: -6.677 LR: -38.295 evals: 255101  2
+        CNUM  len best  Rmsd   Score    FEB    <Score>  stdev cluster
+          0    1    0  -1.00  -44.972  -38.295  -44.972  0.000 [0]
+        FEB = Free Energy of Binding (≈ affinity)
+        Score = 内部スコア (≈ best_energy)
+
+    ADCP 形式 (旧フォーマットも対応):
         mode |  affinity  | ...
-             | (kcal/mol) | ...
-        -----+------------+---
            1      -8.50   ...
         bestEnergy in run 3 -9.12 (0)
     """
@@ -261,29 +287,54 @@ def parse_dlg_file(dlg_file: Path) -> Tuple[float, float, int]:
 
     content = dlg_file.read_text(errors="replace")
 
-    # mode 1 の affinity
+    # --- ADFR 形式: _GenNNNN Score: ... LR: <FEB> ---
+    gen_matches = re.findall(
+        r"_Gen\d+\s+Score:\s+([-\d\.]+)\s+LL:\s+[-\d\.]+\s+LR:\s+([-\d\.]+)",
+        content)
+    if gen_matches:
+        # 最後の _Gen 行が最良結果
+        best_score_str, best_feb_str = gen_matches[-1]
+        affinity    = float(best_feb_str)   # FEB = LR
+        best_energy = float(best_score_str) # Score
+
+        # cluster 数: CNUM テーブルの行数 (最後のクラスタリングブロック)
+        cluster_lines = re.findall(
+            r"^\s+\d+\s+\d+\s+\d+\s+[-\d\.]+\s+[-\d\.]+\s+[-\d\.]+",
+            content, re.MULTILINE)
+        n_clusters = len(cluster_lines) if cluster_lines else 1
+        return affinity, best_energy, n_clusters
+
+    # --- ADCP 形式 (旧フォーマット) ---
     m = re.search(r"^\s+1\s+([-\d\.]+)", content, re.MULTILINE)
     if m:
         affinity = float(m.group(1))
-
-    # GA/MC の best energy
     m = re.search(r"bestEnergy in run \d+ ([-\d\.]+)", content)
     if m:
         best_energy = float(m.group(1))
-
-    # cluster 数 (テーブルの行数)
     n_clusters = len(re.findall(r"^\s+\d+\s+[-\d\.]+", content, re.MULTILINE))
 
     return affinity, best_energy, n_clusters
 
 
 def _find_dlg(out_dir: Path, job_name: str) -> Optional[Path]:
-    """出力ディレクトリから .dlg ファイルを探す (名前が微妙にずれる場合を考慮)"""
-    # 期待するパス
+    """ADFR の出力 DLG ファイルを探す。
+
+    ADFR は result_<job>/NoName*.dlg に個別結果を出力するため、
+    その中で最もサイズの大きいもの (最終 GA run) を返す。
+    見つからない場合は summary.dlg にフォールバック。
+    """
+    # ADFR: サブディレクトリ内の NoName*.dlg
+    sub_dir = out_dir / f"result_{job_name}"
+    if sub_dir.is_dir():
+        dlg_files = sorted(sub_dir.glob("*.dlg"),
+                           key=lambda p: p.stat().st_size, reverse=True)
+        if dlg_files:
+            return dlg_files[0]
+
+    # フォールバック: summary.dlg
     expected = out_dir / f"result_{job_name}_summary.dlg"
     if expected.exists():
         return expected
-    # ディレクトリ内の .dlg を全探索
     dlg_files = list(out_dir.glob("*.dlg"))
     return dlg_files[0] if dlg_files else None
 
@@ -357,31 +408,35 @@ def run_adfr_docking(
         )
 
     # ADFR コマンド
-    # adfr -t receptor.trg -l ligand.pdbqt -o result_job -N 20 -n 2500000 -w output/
+    # adfr -t receptor.trg -l ligand.pdbqt -o result_job -n 20 -e 2500000
+    # 注: -n=nbRuns, -e=maxEvals, -o=logFilename
     cmd = (
         f'adfr'
         f' -t "{trg_file.resolve()}"'
         f' -l "{pdbqt_path.resolve()}"'
         f' -o result_{job_name}'
-        f' -N {n_runs}'
-        f' -n {n_evals}'
-        f' -w "{out_dir.resolve()}"'
+        f' -n {n_runs}'
+        f' -e {n_evals}'
     )
 
     try:
-        r = run_in_adcpsuite(mamba, cmd, timeout=timeout)
+        r = run_in_adcpsuite(mamba, cmd, cwd=str(out_dir.resolve()),
+                             timeout=timeout)
 
-        if r.returncode != 0:
-            # ログを保存してデバッグに備える
+        if r.stderr:
             (out_dir / "adfr_stderr.log").write_text(r.stderr)
+
+        # DLG ファイルが生成されていれば成功とみなす
+        # (numpy DeprecationWarning 等で returncode != 0 でも結果は正常な場合がある)
+        dlg_file  = _find_dlg(out_dir, job_name)
+
+        if r.returncode != 0 and dlg_file is None:
             return ADFRResult(
                 name=name, affinity=float("inf"), best_energy=float("inf"),
                 n_clusters=0, status="failed",
                 error_message=r.stderr[:400],
                 hac=hac, smina_score=smina_score, smina_le=smina_le, pair=pair,
             )
-
-        dlg_file  = _find_dlg(out_dir, job_name)
         pose_file = _find_pose(out_dir, job_name)
 
         if dlg_file is None:

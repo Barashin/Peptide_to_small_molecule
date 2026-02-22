@@ -33,3 +33,15 @@ AdcpTmpDir/
 # エディタ
 .vscode/
 .idea/
+
+# AiZynthFinder モデルデータ (大容量, download_public_data で取得)
+aizynthfinder_data/
+
+# smina バイナリ (ユーザーが各自インストール)
+smina.static
+smina.osx*
+
+# テスト用一時データ
+test_frag_NoName/
+test_frag_NoName_summary.dlg
+fragment_trp_NoName_summary.dlg

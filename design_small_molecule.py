@@ -62,29 +62,8 @@ def _get_linker_core(smiles_r1r2: str) -> str | None:
     return s  # "" は直接連結 (valid)
 
 
-# 残基 → SMILES フラグメント (側鎖部分, 結合点は [*] で表現)
-RESIDUE_SMILES = {
-    "GLY": None,                                    # 側鎖なし
-    "ALA": "C[*]",
-    "VAL": "CC(C)[*]",
-    "ILE": "CCC(C)[*]",
-    "LEU": "CC(C)C[*]",
-    "MET": "CSCC[*]",
-    "PHE": "c1ccccc1C[*]",
-    "TRP": "c1ccc2[nH]ccc2c1C[*]",
-    "PRO": "C1CC[NH2+]C1[*]",                       # 環状なので取り扱い注意
-    "SER": "OC[*]",
-    "THR": "OC(C)[*]",
-    "CYS": "SC[*]",
-    "TYR": "Oc1ccc(C[*])cc1",
-    "ASN": "NC(=O)C[*]",
-    "GLN": "NC(=O)CC[*]",
-    "ASP": "OC(=O)C[*]",
-    "GLU": "OC(=O)CC[*]",
-    "LYS": "NCCCC[*]",
-    "ARG": "NC(=N)NCCC[*]",
-    "HIS": "c1cnc[nH]1C[*]",
-}
+# 残基 → SMILES フラグメント (utils.residue_defs に統合)
+from utils.residue_defs import RESIDUE_SMILES
 
 # ──────────────────────────────────────────
 # リンカー選択は FEgrow ライブラリ (linker_library.py) に委譲
@@ -103,16 +82,7 @@ _SHORT_LINKER_ENTRIES = [
 # 後方互換: strategy③ で使うコアSMILS (リスト)
 _FALLBACK_LINKER_CORES = ["", "CCCC", "CCCCCC"]
 
-# 残基ごとのフラグメント「リーチ」推定値 (Å)
-# Cα から [*] 接続点の反対端（官能基）までの直線距離の概算。
-# DG法ではなく単純に「原子数 × 1.26 Å」の近似値。
-FRAG_REACH = {
-    "ALA": 1.3,   "VAL": 2.5,   "ILE": 3.8,   "LEU": 3.8,
-    "MET": 3.8,   "PHE": 4.5,   "TRP": 5.5,   "PRO": 2.5,
-    "SER": 1.3,   "THR": 2.5,   "CYS": 2.5,   "TYR": 5.0,
-    "ASN": 3.8,   "GLN": 5.0,   "ASP": 3.8,   "GLU": 5.0,
-    "LYS": 5.0,   "ARG": 6.3,   "HIS": 4.5,   "GLY": 0.0,
-}
+from utils.residue_defs import FRAG_REACH
 
 def select_linker(dist: float, reach_a: float, reach_b: float,
                   tolerance: float = 1.5) -> list[str]:
@@ -331,18 +301,9 @@ def build_peptidomimetic(
 
 
 def calculate_drug_likeness(mol) -> dict:
-    """Lipinski Ro5 + Veber則のチェック"""
-    mw   = Descriptors.ExactMolWt(mol)
-    logp = Descriptors.MolLogP(mol)
-    hbd  = rdMolDescriptors.CalcNumHBD(mol)
-    hba  = rdMolDescriptors.CalcNumHBA(mol)
-    psa  = Descriptors.TPSA(mol)
-    rb   = rdMolDescriptors.CalcNumRotatableBonds(mol)
-    ro5  = (mw <= 500 and logp <= 5 and hbd <= 5 and hba <= 10)
-    veber = (rb <= 10 and psa <= 140)
-    return {"MW": round(mw, 2), "LogP": round(logp, 2),
-            "HBD": hbd, "HBA": hba, "PSA": round(psa, 2),
-            "RotBonds": rb, "Ro5": ro5, "Veber": veber}
+    """Lipinski Ro5 + Veber則のチェック (utils.drug_likeness に委譲)"""
+    from utils.drug_likeness import calculate_drug_likeness as _calc
+    return _calc(mol)
 
 
 def generate_3d_conformer(mol, num_confs: int = 10) -> Optional[object]:
@@ -386,6 +347,14 @@ def save_candidates_sdf(candidates: list[dict], output_path: str):
         props = calculate_drug_likeness(mol)
         for k, v in props.items():
             target.SetProp(str(k), str(v))
+        # 合成容易性スコアの追加
+        if "SA_Score" in c:
+            try:
+                from synthesizability import get_synth_props_for_sdf
+                for k, v in get_synth_props_for_sdf(c).items():
+                    target.SetProp(k, v)
+            except ImportError:
+                pass
         writer.write(target)
     writer.close()
     print(f"  候補分子 SDF 保存: {output_path} ({len(candidates)}分子)")
@@ -393,13 +362,30 @@ def save_candidates_sdf(candidates: list[dict], output_path: str):
 
 def print_candidates(candidates: list[dict]):
     print("\n  設計された低分子候補:")
-    print(f"  {'名前':<40} {'SMILES':<50} MW    LogP  Ro5")
-    print("  " + "-" * 110)
+    has_sa = any("SA_Score" in c for c in candidates)
+    if has_sa:
+        print(f"  {'名前':<40} {'SMILES':<40} MW    LogP  Ro5 SA   QED    PAINS BRENK")
+        print("  " + "-" * 130)
+    else:
+        print(f"  {'名前':<40} {'SMILES':<50} MW    LogP  Ro5")
+        print("  " + "-" * 110)
     for c in candidates:
         props = calculate_drug_likeness(c["mol"])
         flag  = "✓" if props["Ro5"] else "✗"
-        print(f"  {c['name']:<40} {c['smiles'][:48]:<50} "
-              f"{props['MW']:<6.0f}{props['LogP']:<6.2f}{flag}")
+        if has_sa:
+            import math
+            sa = c.get("SA_Score", float("nan"))
+            qed = c.get("QED", float("nan"))
+            sa_s  = f"{sa:.1f}" if not math.isnan(sa) else "N/A"
+            qed_s = f"{qed:.3f}" if not math.isnan(qed) else " N/A "
+            pains = "OK" if c.get("PAINS_OK", True) else "NG"
+            brenk = "OK" if c.get("BRENK_OK", True) else "NG"
+            print(f"  {c['name']:<40} {c['smiles'][:38]:<40} "
+                  f"{props['MW']:<6.0f}{props['LogP']:<6.2f}{flag:<4}"
+                  f"{sa_s:<5}{qed_s:<7}{pains:<6}{brenk}")
+        else:
+            print(f"  {c['name']:<40} {c['smiles'][:48]:<50} "
+                  f"{props['MW']:<6.0f}{props['LogP']:<6.2f}{flag}")
 
 
 def get_cbeta_coords_for_residues(pdb_path: str, chain_id: str,
