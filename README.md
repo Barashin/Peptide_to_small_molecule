@@ -119,12 +119,6 @@ python collect_best.py
 
 ![結合親和性比較 smina](docs/images/binding_comparison.png)
 
-### ADCP (環状ペプチド専用) vs smina (低分子) — 参考比較
-
-ADCP (AutoDock CrankPep) は環状ペプチド専用のドッキングエンジンです。smina とはスコアリング関数が異なるため数値の直接比較はできませんが、それぞれの得意分野でのスコアを並べて参考にできます。
-
-![ADCP vs smina](docs/images/adcp_vs_smina_comparison.png)
-
 ### 合成スキーム図 (AiZynthFinder)
 
 AI が提案した前向き合成ルートの例です (1 位の分子、7 ステップ)。
