@@ -77,15 +77,7 @@ PROTEIN_CHAIN  = "A"
 # ──────────────────────────────────────────
 # 残基タイプ定義
 # ──────────────────────────────────────────
-RES_TYPE = {
-    "LYS": "POS", "ARG": "POS", "HIS": "POS",
-    "ASP": "NEG", "GLU": "NEG",
-    "PHE": "ARO", "TYR": "ARO", "TRP": "ARO",
-    "LEU": "HYD", "ILE": "HYD", "VAL": "HYD",
-    "ALA": "HYD", "MET": "HYD", "PRO": "HYD",
-    "SER": "POL", "THR": "POL", "ASN": "POL",
-    "GLN": "POL", "CYS": "POL", "GLY": "HYD",
-}
+from utils.residue_defs import RES_TYPE
 
 # ──────────────────────────────────────────
 # アンカー基ライブラリ
@@ -468,23 +460,9 @@ def select_best_conformer(
 
 
 def calc_drug_likeness(mol: Chem.Mol) -> dict:
-    """Lipinski Ro5 + Veber ルールを計算"""
-    mw    = Descriptors.ExactMolWt(mol)
-    logp  = Descriptors.MolLogP(mol)
-    hbd   = rdMolDescriptors.CalcNumHBD(mol)
-    hba   = rdMolDescriptors.CalcNumHBA(mol)
-    psa   = Descriptors.TPSA(mol)
-    rot   = rdMolDescriptors.CalcNumRotatableBonds(mol)
-    rings = rdMolDescriptors.CalcNumRings(mol)
-    ro5_ok = (mw <= 500) and (logp <= 5) and (hbd <= 5) and (hba <= 10)
-    veber_ok = (psa <= 140) and (rot <= 10)
-    return {
-        "MW": round(mw, 2), "LogP": round(logp, 2),
-        "HBD": hbd, "HBA": hba, "PSA": round(psa, 1),
-        "RotBonds": rot, "Rings": rings,
-        "Ro5": ro5_ok, "Veber": veber_ok,
-        "DrugLike": ro5_ok and veber_ok,
-    }
+    """Lipinski Ro5 + Veber ルールを計算 (utils.drug_likeness に委譲)"""
+    from utils.drug_likeness import calculate_drug_likeness
+    return calculate_drug_likeness(mol)
 
 
 def save_sdf(
@@ -690,6 +668,20 @@ def generate_bridges(
         actual_dist = float(np.linalg.norm(pos_a - pos_b))
         print(f"  実測ファーマコフォア間距離: {actual_dist:.2f} Å (目標: {target_dist:.2f} Å)")
 
+        # ── ④b コンフォメーション適合性スコア ──
+        try:
+            from rigid_scaffold_design import score_pharmacophore_conformance, count_rotatable_between
+            _conf_score = score_pharmacophore_conformance(
+                canon, pharm_a_idx, pharm_b_idx, target_dist, tolerance=1.5, n_confs=100)
+            _mol_for_rot = Chem.MolFromSmiles(canon)
+            _rot_between = count_rotatable_between(_mol_for_rot, pharm_a_idx, pharm_b_idx)
+            print(f"  適合率: {_conf_score['conformance_rate']:.1%} "
+                  f"(中央値={_conf_score['median_dist']:.1f}Å, "
+                  f"回転={_rot_between})")
+        except ImportError:
+            _conf_score = {"conformance_rate": 0.0, "median_dist": 0.0, "dist_std": 0.0}
+            _rot_between = -1
+
         # ── ⑤ Drug-likeness 計算 ──
         mol_no_h = Chem.RemoveHs(mol_h)
         dl = calc_drug_likeness(mol_no_h)
@@ -697,8 +689,28 @@ def generate_bridges(
               f"HBA={dl['HBA']}, PSA={dl['PSA']}, Rot={dl['RotBonds']}")
         print(f"  DrugLike: {dl['DrugLike']} (Ro5={dl['Ro5']}, Veber={dl['Veber']})")
 
+        # ── ⑤b 合成容易性・構造アラート ──
+        try:
+            from synthesizability import calc_sa_score, calc_qed, check_pains, check_brenk
+            _sa = calc_sa_score(mol_no_h)
+            _qed = calc_qed(mol_no_h)
+            _pains_ok, _pains_alerts = check_pains(mol_no_h)
+            _brenk_ok, _brenk_alerts = check_brenk(mol_no_h)
+            import math as _math
+            _sa_s = f"{_sa:.2f}" if not _math.isnan(_sa) else "N/A"
+            _qed_s = f"{_qed:.3f}" if not _math.isnan(_qed) else "N/A"
+            print(f"  SA={_sa_s}, QED={_qed_s}, "
+                  f"PAINS={'OK' if _pains_ok else 'NG'}, "
+                  f"BRENK={'OK' if _brenk_ok else 'NG'}")
+        except ImportError:
+            _sa = float("nan")
+            _qed = float("nan")
+            _pains_ok, _pains_alerts = True, []
+            _brenk_ok, _brenk_alerts = True, []
+
         # ── ⑥ SDF 保存 ──
         sdf_path = str(OUT_DIR / f"input_{name}.sdf")
+        import math as _math
         props = {
             "AnchorA": anchor_a["name"],
             "Linker":  linker["name"],
@@ -708,6 +720,10 @@ def generate_bridges(
             "TargetDist": f"{target_dist:.2f}",
             "ActualDist": f"{actual_dist:.2f}",
             **dl,
+            "SA_Score":  f"{_sa:.2f}" if not _math.isnan(_sa) else "",
+            "QED":       f"{_qed:.4f}" if not _math.isnan(_qed) else "",
+            "PAINS_OK":  str(_pains_ok),
+            "BRENK_OK":  str(_brenk_ok),
         }
         save_sdf(mol_h, best_cid, name, props, sdf_path)
 
@@ -738,7 +754,17 @@ def generate_bridges(
             "dock_score":  dock_score,
             "sdf_input":   sdf_path,
             "sdf_docked":  docked_sdf,
+            "conformance_rate":  _conf_score["conformance_rate"],
+            "median_dist":       _conf_score["median_dist"],
+            "dist_std":          _conf_score["dist_std"],
+            "rotatable_between": _rot_between,
             **dl,
+            "SA_Score":      round(_sa, 2) if not _math.isnan(_sa) else None,
+            "QED":           round(_qed, 4) if not _math.isnan(_qed) else None,
+            "PAINS_OK":      _pains_ok,
+            "BRENK_OK":      _brenk_ok,
+            "PAINS_Alerts":  "; ".join(_pains_alerts),
+            "BRENK_Alerts":  "; ".join(_brenk_alerts),
         })
 
     # ── ⑧ 結果をソート・保存 ──

@@ -14,6 +14,8 @@
    - [STEP 1c: PRODIGY結合親和性予測](#step-1c-prodigy結合親和性予測)
    - [STEP 2: ファーマコフォア抽出](#step-2-ファーマコフォア抽出)
    - [STEP 3: 低分子設計](#step-3-低分子設計)
+   - [STEP 3b: 合成容易性・構造アラート評価](#step-3b-合成容易性構造アラート評価)
+   - [STEP 3c: 逆合成解析](#step-3c-逆合成解析)
    - [STEP 4: 可視化](#step-4-可視化)
    - [STEP 5: sminaドッキング](#step-5-sminaドッキング)
    - [STEP 6b: sminaスコア項分解](#step-6b-sminaスコア項分解)
@@ -70,6 +72,16 @@ Protein_Peptide.pdb
 │  側鎖フラグメント抽出 │
 │  → 骨格連結 (4戦略)  │
 │  → 3D配座生成 → SDF  │
+├──────────────────────┤
+│  STEP 3b             │
+│  合成容易性評価       │
+│  SA Score / QED      │
+│  PAINS / BRENK フィルタ│
+├──────────────────────┤
+│  STEP 3c             │
+│  逆合成解析          │
+│  BRICS / RECAP 分解  │
+│  → 合成ルート推定    │
 └──────────┬───────────┘
            │ candidate_ligands.sdf
            ▼
@@ -125,7 +137,9 @@ Peptide_to_small_molecules/
 ├── analyze_prodigy.py          # STEP 1c: PRODIGY結合親和性予測
 ├── extract_pharmacophore.py    # STEP 2:  ファーマコフォア抽出
 ├── design_small_molecule.py    # STEP 3:  低分子設計（ペプチドミメティクス）
-├── generate_pocket_molecules.py# STEP 3b: ポケット相補分子生成（BRICS）
+├── synthesizability.py         # STEP 3b: 合成容易性・構造アラート評価 (SA/QED/PAINS/BRENK)
+├── retrosynthesis.py           # STEP 3c: 逆合成解析 (BRICS/RECAP/ASKCOS)
+├── generate_pocket_molecules.py# ポケット相補分子生成（BRICS）
 ├── visualize.py                # STEP 4:  可視化
 ├── dock_with_smina.py          # STEP 6/6b: ドッキング + rescoring
 ├── pharmacophore_bridge.py     # STEP 7:  ファーマコフォアブリッジ分子生成
@@ -136,6 +150,11 @@ Peptide_to_small_molecules/
 ├── collect_best.py             # 最終候補選抜・SDF集約スクリプト → Result_Best/
 ├── linker_library.py           # 共有モジュール: FEgrowリンカーライブラリ管理
 ├── plot_utils.py               # matplotlib 日本語フォント設定
+├── utils/                      # 共有ユーティリティパッケージ
+│   ├── __init__.py
+│   ├── drug_likeness.py        #   Drug-likeness (Ro5 + Veber) 計算
+│   ├── ligand_efficiency.py    #   HAC / LE / LE グレード計算
+│   └── residue_defs.py         #   アミノ酸分類・SMILES・ファーマコフォア定義
 ├── smina.osx.12                # sminaバイナリ
 ├── Protein_Peptide.pdb         # 入力構造
 ├── linker_db.json              # FEgrowリンカーDB（初回実行時に自動生成・キャッシュ）
@@ -463,6 +482,155 @@ Veber: 回転可能結合 ≤ 10, PSA ≤ 140 Å²
 
 ---
 
+### STEP 3b: 合成容易性・構造アラート評価
+
+**実装**: `synthesizability.py`
+
+設計された低分子候補が**実際に合成可能か**、**薬剤として妥当か**を自動評価するモジュール。STEP 3 の低分子設計直後にパイプラインから自動実行される。
+
+#### 3b-1. 評価指標
+
+| 指標 | スコア範囲 | 判定基準 | RDKit モジュール |
+|------|-----------|---------|-----------------|
+| **SA Score** (合成容易性) | 1〜10 (低い = 合成容易) | ≤ 6.0 で合格 | `Contrib/SA_Score/sascorer.py` |
+| **QED** (薬剤らしさ) | 0〜1 (高い = 良好) | ≥ 0.2 で合格 | `rdkit.Chem.QED` |
+| **PAINS** (偽陽性フィルタ) | OK / NG | アラートなしで合格 | `FilterCatalog (PAINS, 480パターン)` |
+| **BRENK** (構造アラート) | OK / NG | アラートなしで合格 | `FilterCatalog (BRENK, 105パターン)` |
+
+#### 3b-2. SA Score
+
+Ertl & Schuffenhauer (J. Cheminform., 2009) のアルゴリズムに基づく合成容易性スコア。分子のフラグメント頻度、立体中心数、大員環の有無などを考慮する。
+
+```
+SA Score = fragmentScore(mol) − complexityPenalty(mol)
+
+典型値:
+  ベンゼン    : 1.00  (極めて容易)
+  アスピリン  : 1.37  (容易)
+  イブプロフェン: 1.33  (容易)
+  タキソール  : 7.05  (非常に困難)
+```
+
+RDKit の `Contrib/SA_Score/sascorer.py` を遅延ロード（singleton）で読み込む。
+
+#### 3b-3. PAINS / BRENK フィルタ
+
+**PAINS (Pan-Assay Interference Compounds)**: HTS で頻繁に偽陽性を示す480種の部分構造パターン。これらを含む分子はアッセイ妨害物質として除外すべき。
+
+**BRENK**: Brenk et al. (ChemMedChem, 2008) が報告した105種の有害構造パターン。反応性官能基（アシルハライド、マイケルアクセプターなど）や毒性フラグメントを検出する。
+
+```python
+# FilterCatalog の使い方
+from rdkit.Chem.FilterCatalog import FilterCatalog, FilterCatalogParams
+params = FilterCatalogParams()
+params.AddCatalog(FilterCatalogParams.FilterCatalogs.PAINS)
+catalog = FilterCatalog(params)
+match = catalog.GetFirstMatch(mol)  # None = クリーン
+```
+
+#### 3b-4. 合格判定
+
+```
+Synth_Pass = (SA_Score ≤ 6.0) AND (PAINS_OK) AND (BRENK_OK)
+```
+
+デフォルト閾値（`--sa-threshold` で変更可能）：
+
+```python
+DEFAULT_THRESHOLDS = {
+    "SA_Score_max": 6.0,   # SA Score 上限
+    "QED_min":      0.2,   # QED 下限
+    "PAINS_OK":     True,  # PAINS アラート除外
+    "BRENK_OK":     True,  # BRENK アラート除外
+}
+```
+
+全関数は失敗時に安全なデフォルト値（NaN / True）を返し、パイプラインを中断しない。
+
+---
+
+### STEP 3c: 逆合成解析
+
+**実装**: `retrosynthesis.py`
+
+候補分子を**合成的に意味のある結合で切断**し、得られるフラグメントの市販品入手性を評価することで、合成ルートの実現可能性を推定するモジュール。
+
+#### 3c-1. 3 段階アプローチ
+
+| 手法 | 切断ルール | フラグメント数 | 特徴 |
+|------|-----------|-------------|------|
+| **BRICS** | 16 種の合成的結合切断 | 多い（網羅的） | Retrosynthetically Interesting Chemical Substructures |
+| **RECAP** | メディシナルケミストリーの一般的反応 | 少ない（保守的） | Retrosynthetic Combinatorial Analysis Procedure |
+| **ASKCOS** (オプション) | AI ベースの逆合成予測 | — | MIT ASKCOS API 経由 |
+
+#### 3c-2. BRICS 逆合成
+
+RDKit の `Chem.BRICS.BRICSDecompose()` を使用。16 種の合成的に意味のある結合パターンで分子を切断する。
+
+```
+BRICS 反応タイプ（主要なもの）:
+  C-C 単結合 (sp3)           →  炭素鎖の切断
+  アミド C-N                 →  アミド結合縮合
+  エーテル / エステル C-O    →  エーテル / エステル形成
+  芳香環 C-C (Suzuki 等)     →  Suzuki / Heck カップリング
+  C=C (オレフィン)           →  オレフィンメタセシス
+```
+
+各フラグメントに対して SA Score を計算し、市販品レベルかを判定：
+
+```
+市販品判定:
+  重原子数 ≤ 3                            → 市販品（小分子は入手容易）
+  SA Score ≤ 3.5 かつ 重原子数 ≤ 15       → 市販品レベル
+
+切断数 ≈ 合成ステップ数の目安
+```
+
+#### 3c-3. RECAP 逆合成
+
+RDKit の `Chem.Recap.RecapDecompose()` を使用。再帰的にツリー構造で分解し、リーフノードを収集する。
+
+```
+RECAP 反応タイプ:
+  アミド結合形成        (amide)
+  エステル化           (ester)
+  還元的アミノ化       (amine)
+  ウィリアムソンエーテル合成 (ether)
+  Suzuki / Heck カップリング (aromatic_c)
+  スルホンアミド形成    (sulfonamide)
+```
+
+#### 3c-4. ASKCOS API（オプション）
+
+MIT の ASKCOS (Automated System for Knowledge of Organic Synthesis) API を使った AI ベースの逆合成ルート予測。外部 API が利用可能な場合のみ使用される。
+
+```python
+askcos_retrosynthesis(smiles, api_url="https://askcos.mit.edu/api/v2")
+# → {"status": "成功", "n_routes": 3, "best_route": {...}}
+```
+
+#### 3c-5. 総合判定
+
+BRICS と RECAP の結果を統合して合成可能性を6段階で判定：
+
+| 判定 | 条件 |
+|------|------|
+| **市販品レベル** | SA ≤ 3.0（そのまま購入可能） |
+| **容易** | 1-2 ステップ、全フラグメント市販品 |
+| **比較的容易** | 3-4 ステップ、全フラグメント市販品 |
+| **中程度** | 3-4 ステップ、フラグメント SA ≤ 4-5 |
+| **やや困難** | 特殊フラグメントを含む |
+| **困難** | 6 ステップ以上の多段階合成 |
+
+#### 3c-6. 出力
+
+| ファイル | 形式 | 内容 |
+|---------|------|------|
+| `retrosynthesis_report.json` | JSON | 全分子の詳細解析結果（BRICS/RECAP フラグメント・反応タイプ） |
+| `retrosynthesis_summary.csv` | CSV | サマリー（切断数・最大 SA・判定・反応タイプ） |
+
+---
+
 ### STEP 4: 可視化
 
 **実装**: `visualize.py`
@@ -573,6 +741,25 @@ Affinity:    -7.15 kcal/mol
 H結合:       -2.22 kcal/mol  ← 最大の貢献
 疎水性:      -1.54 kcal/mol
 立体反発:    +2.39 kcal/mol  (不利な要因)
+```
+
+---
+
+### 共有モジュール: utils/ パッケージ
+
+パイプライン全体で重複していた定義・計算ロジックを一元管理する共有ユーティリティパッケージ。
+
+| モジュール | 内容 | 使用元 |
+|-----------|------|--------|
+| `utils/drug_likeness.py` | Lipinski Ro5 + Veber ルール計算 (`calculate_drug_likeness()`) | `design_small_molecule.py`, `pharmacophore_bridge.py`, `generate_pocket_molecules.py` |
+| `utils/ligand_efficiency.py` | HAC / LE / LE グレード計算 | `collect_best.py` |
+| `utils/residue_defs.py` | アミノ酸分類 (`HYDROPHOBIC_AA` 等)、残基SMILES (`RESIDUE_SMILES`)、機能タイプ (`RES_TYPE`)、フラグメントリーチ (`FRAG_REACH`) | `analyze_interactions.py`, `design_small_molecule.py`, `pharmacophore_bridge.py`, `generate_pocket_molecules.py` |
+
+```python
+# 使用例
+from utils.drug_likeness import calculate_drug_likeness
+from utils.ligand_efficiency import calc_hac, calc_le, le_grade
+from utils.residue_defs import HYDROPHOBIC_AA, RES_TYPE, RESIDUE_SMILES
 ```
 
 ---
@@ -967,28 +1154,104 @@ obabel -isdf mol.sdf -opdbqt -O mol.pdbqt --partialcharge gasteiger -h
 # フォールバック 2: prepare_ligand4.py (adcpsuite 付属)
 ```
 
+**PDBQT 後処理 (ADFR 互換性)**:
+
+obabel は SDF 中の複数コンフォーマーを `MODEL 1` / `ENDMDL` / `MODEL 2` / ... のように
+複数モデルとして出力するが、ADFR は**単一モデルのみ**を受け付ける。
+また、`getTORSDOF()` がファイル末尾行を `TORSDOF n` として解析するため、
+`ENDMDL` 行が残ると `IndexError` が発生する。
+
+```python
+# 変換後の後処理 (dock_smol_adfr.py 内で自動実行)
+# ① 最初の MODEL のみ抽出 (2番目以降のコンフォーマーを破棄)
+# ② MODEL / ENDMDL 行を除去
+# → ADFR が期待する "ROOT ... TORSDOF n" 形式に整形
+```
+
 #### 10-3. ADFR 低分子ドッキング
 
 ```bash
-# 内部実行コマンド
-adfr -t receptor.trg \
-     -l ligand.pdbqt \
-     -o result_{mol_name} \
-     -N 20 -n 2500000 \
-     -w results/adfr_docking/{mol_name}/
+# 内部実行コマンド (peptide_pipeline 環境から micromamba run で adcpsuite を呼び出し)
+micromamba run -n adcpsuite \
+  adfr -t receptor.trg \
+       -l ligand.pdbqt \
+       -o result_{mol_name} \
+       -n 20 -e 2500000
 ```
 
 | フラグ | 説明 |
 |--------|------|
-| `-t receptor.trg` | ADCP と共用の AutoSite v1.1 ターゲットファイル |
-| `-l ligand.pdbqt` | PDBQT 形式リガンド |
-| `-N 20` | GA (遺伝的アルゴリズム) 探索回数 |
-| `-n 2500000` | 各 GA 実行での評価ステップ数 |
-| `--quick` | `-N 5, -n 500000` (高速テスト用) |
+| `-t receptor.trg` | ADCP と共用の AutoSite v1.1 ターゲットファイル (.trg = zip 形式) |
+| `-l ligand.pdbqt` | PDBQT 形式リガンド (単一モデル) |
+| `-n 20` | GA (遺伝的アルゴリズム) 探索回数 |
+| `-e 2500000` | 各 GA 実行での最大評価ステップ数 |
+| `--quick` | `-n 5, -e 500000` (高速テスト用) |
 
-出力 (`.dlg` ファイル) から **mode 1 の affinity** を抽出する。
+> **注意**: `adfr` の `-n` は GA run 数 (≠ smina の `-n`)、`-e` は maxEvals。
+> 出力ディレクトリの変更は `cwd` (カレントディレクトリ) で制御する (`-w` フラグは存在しない)。
 
-#### 10-4. 生成される比較グラフ (4 種)
+#### 10-4. ADFR DLG 出力フォーマットとパース
+
+ADFR は ADCP とは異なる DLG フォーマットで結果を出力する。
+
+**ディレクトリ構造**:
+
+```
+results/adfr_docking/{mol_name}/
+├── result_{name}_summary.dlg          # 実行ログのみ (スコアなし)
+└── result_{name}/
+    ├── NoName0001.dlg                 # GA run 1 の全世代ログ
+    ├── NoName0002.dlg                 # GA run 2
+    └── ...
+```
+
+**DLG ファイル内のスコア情報**:
+
+```
+# 各世代の最良スコアを記録 (_GenNNNN 行)
+_Gen0044 Score: -44.972 LL: -6.677 LR: -38.295 evals: 255101  2
+                ^^^^^            ^^^^^   ^^^^^^^
+                内部スコア    リガンド   FEB (= Affinity)
+                (Score)      内部E     Free Energy of Binding
+
+# 最終クラスタリングテーブル
+CNUM  len best  Rmsd    Score      FEB      <Score>  stdev cluster
+  0    3    0  -1.00  -44.972  -38.295    -44.972  0.000 [0, 1, 2]
+  1    4    6  -1.00  -43.132  -37.441    -43.132  0.000 [6, 3, 4, 5]
+```
+
+**パースアルゴリズム** (`parse_dlg_file()`):
+
+```python
+# ① 最大の NoName*.dlg を選択 (最終 GA run = 最も情報が多い)
+# ② _GenNNNN 行を全て収集し、最後の行から FEB (= LR 値) を Affinity として抽出
+# ③ Score を best_energy として抽出
+# ④ CNUM テーブルの行数を n_clusters として計数
+```
+
+> **FEB (Free Energy of Binding)** = `Score - LL` (Score: 結合+リガンド内部エネルギー,
+> LL: リガンド単体の内部エネルギー)。FEB が低分子の結合親和性に相当する。
+
+#### 10-5. numpy 互換性パッチ (adcpsuite 環境)
+
+adcpsuite の Python 3.7 環境に含まれる numpy (1.21.6) で、
+`mglutil/math/rmsd.py` の `MorpicRMSD.setMorphisms()` が
+ragged nested sequence (不揃い長のリスト) を `numpy.array()` に渡す際に
+`VisibleDeprecationWarning` が発生し、ADFR の GA ポーズ生成がクラッシュする問題がある。
+
+```python
+# 修正前 (rmsd.py:333)
+self.morphisms = numpy.array(morphisms)        # ← ragged array で失敗
+
+# 修正後
+self.morphisms = [numpy.array(m) for m in morphisms]  # ← 個別に変換
+```
+
+この修正により、各 morphism (原子ペアリスト) が個別の numpy 配列として保持され、
+後続の `morph[:, 0]`, `morph[:, 1]` スライシングが正しく動作する。
+修正手順は「使い方 → ⑤ ADCP/ADFR 環境構築 → 5-3」を参照。
+
+#### 10-6. 生成される比較グラフ (4 種)
 
 | ファイル | 内容 |
 |----------|------|
@@ -1015,13 +1278,24 @@ adfr -t receptor.trg \
 
 ### 低分子生成手法の比較
 
-| 手法 | 設計起点 | 3D形状考慮 | DrugLike担保 | 実装ファイル |
-|------|---------|-----------|-------------|-------------|
-| ペプチドミメティクス (STEP 3) | ペプチド側鎖フラグメント | × | Ro5チェックのみ | `design_small_molecule.py` |
-| ポケット相補設計 + BRICS (STEP 3b) | タンパク質ポケット残基タイプ | △ (テンプレート) | Ro5 + BRICSフィルタ | `generate_pocket_molecules.py` |
-| **ファーマコフォアブリッジ (STEP 7)** | **ポケット残基間Cβ距離** | **◎ (DG法拘束)** | Ro5 + Veber | `pharmacophore_bridge.py` |
+| 手法 | 設計起点 | 3D形状考慮 | DrugLike担保 | 合成容易性評価 | 実装ファイル |
+|------|---------|-----------|-------------|-------------|-------------|
+| ペプチドミメティクス (STEP 3) | ペプチド側鎖フラグメント | × | Ro5チェックのみ | SA/QED/PAINS/BRENK + 逆合成 | `design_small_molecule.py` |
+| ポケット相補設計 + BRICS | タンパク質ポケット残基タイプ | △ (テンプレート) | Ro5 + BRICSフィルタ | — | `generate_pocket_molecules.py` |
+| **ファーマコフォアブリッジ (STEP 7)** | **ポケット残基間Cβ距離** | **◎ (DG法拘束)** | Ro5 + Veber | SA/QED/PAINS/BRENK | `pharmacophore_bridge.py` |
 
 STEP 7 の距離幾何学アプローチは、ポケット形状を定量的に反映した最初の手法であり、生成された3D構造がより実際の結合部位に適合する。
+
+### 合成容易性評価手法の比較
+
+| 手法 | 評価対象 | 速度 | 情報量 | 実装ファイル |
+|------|---------|------|--------|-------------|
+| SA Score | 合成の難易度 (統計ベース) | 高速 | 1スコア値 | `synthesizability.py` |
+| QED | 薬剤らしさ (多属性統合) | 高速 | 1スコア値 | `synthesizability.py` |
+| PAINS / BRENK | 構造アラート (SMARTSパターンマッチ) | 高速 | OK/NG + 違反パターン名 | `synthesizability.py` |
+| BRICS 逆合成 | 合成ルート推定 (結合切断) | 中速 | フラグメント一覧 + 反応タイプ | `retrosynthesis.py` |
+| RECAP 逆合成 | 合成ルート推定 (メドケム反応) | 中速 | ツリー構造 + リーフ一覧 | `retrosynthesis.py` |
+| ASKCOS (オプション) | AI 逆合成ルート予測 | 低速 (API) | 複数ルート候補 | `retrosynthesis.py` |
 
 ---
 
@@ -1031,18 +1305,18 @@ STEP 7 の距離幾何学アプローチは、ポケット形状を定量的に�
 
 | ソフトウェア | バージョン | 備考 |
 |---|---|---|
-| macOS | 12 Monterey 以降 | `smina.osx.12` の動作要件 |
-| Python | 3.9 以上 | 3.14 で動作確認済み |
-| micromamba | 最新 | ADCP/ADFR 専用環境用（STEP 9/10 のみ） |
+| Linux / macOS / WSL2 | — | Linux (WSL2) / macOS 12+ で動作確認済み |
+| Python | 3.9 以上 | 3.11 推奨 (3.14 でも動作確認済み) |
+| conda / micromamba | 最新 | メインパイプライン環境 + ADCP/ADFR 専用環境の構築に使用 |
 
 ---
 
 ### クイックスタート（全体の流れ）
 
 ```
-① smina 権限設定
+① smina の準備 (プラットフォームに合わせてバイナリ設定)
         ↓
-② Python 仮想環境構築 (venv)
+② Python 環境構築 (conda推奨 / venv も可)
         ↓
 ③ メインパイプライン実行 (STEP 1〜6)  →  results/ に出力
         ↓
@@ -1052,7 +1326,7 @@ STEP 7 の距離幾何学アプローチは、ポケット形状を定量的に�
         ↓
 ⑥ 最終候補の選抜 (collect_best.py)  →  Result_Best/ に出力
         ↓
-⑦ micromamba + adcpsuite 環境構築 ← STEP 9/10 に必要（初回のみ）
+⑦ adcpsuite 環境構築 (micromamba) ← STEP 9/10 に必要（初回のみ）
         ↓
 ⑧ STEP 9: AutoDock CrankPep 環状ペプチドドッキング (ADCP)
         ↓
@@ -1061,12 +1335,29 @@ STEP 7 の距離幾何学アプローチは、ポケット形状を定量的に�
 
 ---
 
-### ① smina バイナリの権限設定（macOS / 初回のみ）
+### ① smina の準備
 
-macOS はダウンロードしたバイナリに実行権限がなく、Gatekeeper にもブロックされます。
+スクリプト内部では `smina.osx.12` を参照するため、プラットフォームに合わせて
+シンボリックリンクを作成します。
+
+#### Linux / WSL2 の場合
 
 ```bash
-# 実行権限を付与
+# conda-forge から smina をインストール (推奨)
+conda install smina -c conda-forge -y
+
+# シンボリックリンクを作成 (conda の smina を使う場合)
+ln -sf "$(which smina)" smina.osx.12
+
+# または Linux 用の静的バイナリを用意した場合
+chmod +x smina.static
+ln -sf smina.static smina.osx.12
+```
+
+#### macOS の場合
+
+```bash
+# 同梱バイナリに実行権限を付与
 chmod +x smina.osx.12
 
 # Gatekeeper の隔離フラグを解除
@@ -1074,37 +1365,56 @@ xattr -cr smina.osx.12
 ```
 
 > **確認方法**: `./smina.osx.12 --version` でバージョン文字列が表示されれば OK。
-> それでもブロックされる場合は [システム設定 → プライバシーとセキュリティ] で許可してください。
 
 ---
 
-### ② Python 仮想環境の構築（初回のみ）
+### ② Python 環境の構築（初回のみ）
+
+rdkit は conda-forge からのインストールが最も確実です。
+
+#### 方法 A: conda (推奨)
 
 ```bash
-# 仮想環境を作成（プロジェクト直下に venv/ が生成される）
-python3 -m venv venv
+# conda 環境を作成 (Python 3.11 + rdkit)
+conda create -n peptide_pipeline python=3.11 rdkit -c conda-forge -y
+conda activate peptide_pipeline
 
-# パッケージをインストール
-venv/bin/pip install --upgrade pip
-venv/bin/pip install biopython numpy scipy matplotlib rdkit
+# 残りのパッケージをインストール
+pip install biopython numpy scipy matplotlib
 ```
 
-> **rdkit が pip でインストールできない場合**（Python バージョン非対応など）:
-> ```bash
-> # conda または micromamba を使う
-> conda create -n peptide_pipeline python=3.11 rdkit -c conda-forge -y
-> conda activate peptide_pipeline
-> pip install biopython numpy scipy matplotlib
-> # 以降のコマンドの venv/bin/python を python に読み替えてください
-> ```
+以降のコマンドは `conda activate peptide_pipeline` した状態で
+`python` を使用してください。
+
+#### 方法 B: venv (rdkit が pip 対応のバージョンの場合)
+
+```bash
+python3 -m venv venv
+venv/bin/pip install --upgrade pip
+pip install biopython numpy scipy matplotlib rdkit
+```
+
+> **動作確認済み環境** (conda 方式):
+>
+> | パッケージ | バージョン |
+> |---|---|
+> | Python | 3.11 |
+> | rdkit | 2025.09.5 |
+> | biopython | 1.86 |
+> | numpy | 2.4.2 |
+> | scipy | 1.17.0 |
+> | matplotlib | 3.10.8 |
 
 ---
 
 ### ③ メインパイプラインの実行（STEP 1〜6）
 
 ```bash
+# conda 方式の場合
+conda activate peptide_pipeline
+
 # フル実行（相互作用解析 → 低分子設計 → smina ドッキング）
-venv/bin/python pipeline.py Protein_Peptide.pdb
+python pipeline.py Protein_Peptide.pdb
 ```
 
 **所要時間**: 15〜30 分（デフォルト設定）
@@ -1112,16 +1422,22 @@ venv/bin/python pipeline.py Protein_Peptide.pdb
 
 ```bash
 # 設計に使う残基を増やす（候補数が増える）
-venv/bin/python pipeline.py --top-residues 4
+python pipeline.py --top-residues 4
 
 # ドッキング精度を上げる（時間が増える）
-venv/bin/python pipeline.py --exhaustiveness 16 --num-modes 9
+python pipeline.py --exhaustiveness 16 --num-modes 9
 
 # 設計だけ行い、ドッキングをスキップ
-venv/bin/python pipeline.py --skip-docking
+python pipeline.py --skip-docking
+
+# SA Score 閾値を厳しくする（合成容易な分子のみ残す）
+python pipeline.py --sa-threshold 4.0
+
+# 合成容易性評価・逆合成解析をスキップ
+python pipeline.py --skip-synth-filter
 
 # ドッキングのみ単体実行（既存 SDF を再利用する場合）
-venv/bin/python dock_with_smina.py Protein_Peptide.pdb \
+python dock_with_smina.py Protein_Peptide.pdb \
     --ligands results/candidate_ligands.sdf \
     --output-dir results/docking
 ```
@@ -1133,7 +1449,7 @@ venv/bin/python dock_with_smina.py Protein_Peptide.pdb \
 STEP 6 が終わったら上位候補を `Result_Best/` にまとめます。
 
 ```bash
-venv/bin/python collect_best.py
+python collect_best.py
 # → Result_Best/summary.csv  (STEP 10 の ADFR ドッキングで読み込む)
 # → Result_Best/01_score*.sdf 〜 15_score*.sdf
 ```
@@ -1143,18 +1459,22 @@ venv/bin/python collect_best.py
 ### ⑤ ADCP/ADFR 環境構築（初回のみ・STEP 9/10 を使う場合）
 
 STEP 9 (ADCP) と STEP 10 (ADFR) には Python 3.7 の専用環境 **adcpsuite** が必要です。
-メインパイプラインの `venv` とは**別の環境**で、`micromamba` で管理します。
+メインパイプラインとは**別の環境**で、`micromamba` で管理します。
+
+> **注意**: STEP 9/10 のスクリプトは `peptide_pipeline` 環境から実行しますが、
+> 内部で `micromamba run -n adcpsuite ...` を使い adcpsuite を自動呼び出しするため、
+> 手動で adcpsuite を activate する必要はありません。
 
 #### 5-1. micromamba のインストール
 
 ```bash
-# Homebrew を使う場合（推奨）
+# macOS (Homebrew)
 brew install micromamba
 
-# または公式インストーラ
+# Linux / WSL2
 curl -Ls https://micro.mamba.pm/install.sh | bash
-# → ~/.zshrc または ~/.bashrc に初期化コードが追記される
-# → ターミナルを再起動するか source ~/.zshrc を実行
+# → ~/.bashrc に初期化コードが追記される
+# → ターミナルを再起動するか source ~/.bashrc を実行
 ```
 
 > **確認方法**: `micromamba --version` でバージョンが表示されれば OK。
@@ -1168,13 +1488,30 @@ bash adcpsuite_micromamba.sh
 # 所要時間: 5〜20 分（ダウンロード込み）
 ```
 
-#### 5-3. 受容体ターゲットファイルの作成（初回のみ）
+#### 5-3. numpy 互換性パッチの適用 (Linux / WSL2)
+
+adcpsuite 環境の numpy バージョンによっては ADFR 実行時に
+`VisibleDeprecationWarning: ragged nested sequences` が発生し
+ポーズが生成されないことがあります。以下の修正を適用してください。
+
+```bash
+# adcpsuite 環境内の rmsd.py を修正
+RMSD_PY="$(micromamba run -n adcpsuite python -c \
+  "import mglutil.math.rmsd; print(mglutil.math.rmsd.__file__)")"
+
+# 333 行目付近の numpy.array(morphisms) を修正
+sed -i 's/self\.morphisms = numpy\.array(morphisms)/self.morphisms = [numpy.array(m) for m in morphisms]/' "$RMSD_PY"
+```
+
+#### 5-4. 受容体ターゲットファイルの作成（初回のみ）
 
 ADCP と ADFR は共通の `.trg` ファイルを使います。一度だけ作成すれば以降は不要です。
 
 ```bash
+# peptide_pipeline 環境で実行 (内部で adcpsuite を呼び出す)
+conda activate peptide_pipeline
 python dock_cyclic_adcp.py --setup-receptor
-# → results/adcp_docking/receptor.trg を生成 (≈28 MB)
+# → results/adcp_docking/receptor.trg を生成 (≈10 MB)
 # 所要時間: 2〜5 分
 ```
 
@@ -1184,19 +1521,19 @@ python dock_cyclic_adcp.py --setup-receptor
 
 ```bash
 # 既知ポケットペアを一覧表示
-venv/bin/python pharmacophore_bridge.py --list-pairs
+python pharmacophore_bridge.py --list-pairs
 
 # LYS48–LEU50 間を橋渡しする分子を生成 + ドッキング
-venv/bin/python pharmacophore_bridge.py --point1 LYS48 --point2 LEU50
+python pharmacophore_bridge.py --point1 LYS48 --point2 LEU50
 
 # LYS46–TYR49 をターゲット（ドッキングなし、高速確認）
-venv/bin/python pharmacophore_bridge.py --point1 LYS46 --point2 TYR49 --no-dock
+python pharmacophore_bridge.py --point1 LYS46 --point2 TYR49 --no-dock
 
 # 任意残基ペアを指定（ARG28–TYR49, 9.1 Å）
-venv/bin/python pharmacophore_bridge.py --point1 ARG28 --point2 TYR49
+python pharmacophore_bridge.py --point1 ARG28 --point2 TYR49
 
 # コンフォマー数を増やして探索を強化
-venv/bin/python pharmacophore_bridge.py \
+python pharmacophore_bridge.py \
     --point1 ILE21 --point2 TYR25 \
     --n-confs 100 --exhaustiveness 16
 ```
@@ -1219,16 +1556,16 @@ venv/bin/python pharmacophore_bridge.py \
 
 ```bash
 # 環状ペプチドをドッキングして既存低分子と比較 (推奨)
-venv/bin/python compare_cyclic_peptide.py Protein_Peptide.pdb
+python compare_cyclic_peptide.py Protein_Peptide.pdb
 
 # 以前のドッキング結果を使って比較グラフのみ再生成 (高速)
-venv/bin/python compare_cyclic_peptide.py --no-dock
+python compare_cyclic_peptide.py --no-dock
 
 # 配座生成数を増やして精度向上 (時間増)
-venv/bin/python compare_cyclic_peptide.py --n-confs 500 --exhaustiveness 24
+python compare_cyclic_peptide.py --n-confs 500 --exhaustiveness 24
 
 # 異なるペプチド配列で比較
-venv/bin/python compare_cyclic_peptide.py --sequence GEVDGWATPD
+python compare_cyclic_peptide.py --sequence GEVDGWATPD
 ```
 
 #### STEP 8 オプション一覧
@@ -1327,6 +1664,8 @@ python dock_smol_adfr.py --n-runs 30 --n-evals 5000000
 | `--skip-rescore` | — | score_only rescoring をスキップ |
 | `--skip-sasa` | — | ΔSASA解析をスキップ |
 | `--skip-prodigy` | — | PRODIGY予測をスキップ |
+| `--sa-threshold` | `6.0` | SA Score 合成容易性閾値 (STEP 3b) |
+| `--skip-synth-filter` | — | 合成容易性評価・逆合成解析をスキップ (STEP 3b/3c) |
 | `--output-dir` | `results` | 出力ディレクトリ |
 
 ---
@@ -1342,8 +1681,10 @@ results/
 ├── prodigy_contacts.png       # 界面接触タイプ円グラフ
 ├── pharmacophore.csv          # ファーマコフォア特徴点（x,y,z座標）
 ├── pharmacophore.pml          # PyMOL用ファーマコフォア描画スクリプト
-├── candidate_ligands.sdf      # 設計した低分子候補（3D配座つき）
-├── report.json                # パイプライン全体のサマリー（PRODIGY/SASA含む）
+├── candidate_ligands.sdf      # 設計した低分子候補（3D配座つき、SA/QED プロパティ付）
+├── report.json                # パイプライン全体のサマリー（PRODIGY/SASA/SA/QED含む）
+├── retrosynthesis_report.json # 逆合成解析詳細 (BRICS/RECAP フラグメント・反応タイプ)
+├── retrosynthesis_summary.csv # 逆合成解析サマリー (切断数・判定・反応タイプ)
 ├── residue_scores.png         # 残基重要度グラフ
 ├── interaction_map.png        # 相互作用ヒートマップ
 ├── pharmacophore_3d.png       # ファーマコフォア3D図
@@ -1385,6 +1726,10 @@ CSV の主要カラム:
 | `dock_score` | sminaドッキングスコア (kcal/mol) |
 | `MW`, `LogP`, `HBD`, `HBA`, `PSA`, `RotBonds` | 物理化学的性質 |
 | `DrugLike` | Ro5 + Veber 充足フラグ |
+| `SA_Score` | 合成容易性スコア (1〜10、低い = 合成容易) |
+| `QED` | 薬剤らしさスコア (0〜1、高い = 良好) |
+| `PAINS_OK` | PAINS フィルタ通過フラグ |
+| `BRENK_OK` | BRENK 構造アラート通過フラグ |
 
 ```
 results/comparison/                           # STEP 8 (smina 環状ペプチド比較) 出力
@@ -1512,6 +1857,8 @@ python collect_best.py
 | スコアカットオフ | ≤ -5.0 kcal/mol |
 | スコア上位 | Top 10 (より負 = 強い結合) |
 | LE 上位 | Top 5 (重複除去後に追加) |
+| 合成容易性 | SA Score, QED, PAINS/BRENK フィルタ結果を `summary.csv` に付与 |
+| 逆合成 | BRICS/RECAP 逆合成解析結果 (判定・切断数) を `summary.csv` に付与 |
 
 ### LE (Ligand Efficiency) の見方
 
@@ -1561,27 +1908,32 @@ set transparency, 0.5, receptor
 
 - smina (AutoDock Vina) スコアは**同一受容体での比較**に有効
 - ペプチド vs 低分子の直接比較は LE を参照すること
+- SA Score / QED はあくまで計算予測値であり、実際の合成可能性は合成化学者の判断が必要
+- PAINS / BRENK アラートは偽陽性の可能性があるため、ヒット化合物が除外された場合は個別に確認を推奨
+- 逆合成解析（BRICS/RECAP）の切断数は合成ステップ数の**下限値の目安**であり、実際の合成ルートはより多くのステップを要することがある
 - 実験的検証 (IC50, SPR, ITC 等) で確認が必要
 
 ---
 
 ## 依存関係
 
-### メインパイプライン環境 (venv)
+### メインパイプライン環境 (conda 推奨)
 
 | パッケージ | バージョン | 用途 |
 |---|---|---|
-| Python | 3.9 以上 (3.14 確認済み) | 実行環境 |
+| Python | 3.9 以上 (3.11 推奨, 3.14 確認済み) | 実行環境 |
 | biopython | 1.86 | PDB解析・NeighborSearch |
-| rdkit | 2025.9.5 | 分子操作・3D配座生成 |
+| rdkit | 2025.09.5 | 分子操作・3D配座生成 |
 | numpy | 2.4.2 | 座標計算 |
 | scipy | 1.17.0 | 数値計算 |
 | matplotlib | 3.10.8 | グラフ生成 |
-| smina | dc3dfab+ | ドッキング（AutoDock Vina 1.1.2ベース、macOS バイナリ同梱） |
+| smina | 2020.12.10 | ドッキング（AutoDock Vina 1.1.2ベース、macOS バイナリ同梱 / Linux は conda-forge or 静的バイナリ） |
 
 ```bash
-# インストールコマンド
-venv/bin/pip install biopython numpy scipy matplotlib rdkit
+# インストールコマンド (conda)
+conda create -n peptide_pipeline python=3.11 rdkit -c conda-forge -y
+conda activate peptide_pipeline
+pip install biopython numpy scipy matplotlib
 ```
 
 ### ADCP/ADFR 環境 (adcpsuite / micromamba)

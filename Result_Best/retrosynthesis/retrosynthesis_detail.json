@@ -1,0 +1,197 @@
+[
+  {
+    "name": "reduced_peptide_TRP_ALA_PRO_direct",
+    "smiles": "CC1[NH2+]CCC1NC(=O)CCNC(=O)CCc1c(N)ccc2[nH]ccc12",
+    "overall_feasibility": "合成可能 (AI 7 ステップ)",
+    "brics": {
+      "n_cuts": 4,
+      "feasibility": "やや困難 (特殊フラグメントを含む)",
+      "reactions": [
+        "BRICS type (1, 4)",
+        "BRICS type (1, 8)",
+        "C-N (複素環)",
+        "アミド C-N",
+        "芳香環 C-C (Suzuki 等)"
+      ],
+      "fragments": [
+        {
+          "smiles": "CC1CCC[NH2+]1",
+          "sa_score": 5.96,
+          "n_atoms": 6,
+          "buyable": false
+        },
+        {
+          "smiles": "CCC=O",
+          "sa_score": 2.63,
+          "n_atoms": 4,
+          "buyable": true
+        },
+        {
+          "smiles": "CCC=O",
+          "sa_score": 2.63,
+          "n_atoms": 4,
+          "buyable": true
+        },
+        {
+          "smiles": "Nc1ccc2[nH]ccc2c1",
+          "sa_score": 2.1,
+          "n_atoms": 10,
+          "buyable": true
+        },
+        {
+          "smiles": "N",
+          "sa_score": 6.67,
+          "n_atoms": 1,
+          "buyable": true
+        }
+      ]
+    },
+    "recap": {
+      "tree_depth": 2,
+      "n_leaves": 3
+    }
+  },
+  {
+    "name": "direct_link_TRP_ALA_PRO",
+    "smiles": "c1cc(CCC2CC[NH2+]C2)c2cc[nH]c2c1",
+    "overall_feasibility": "合成可能 (AI 6 ステップ)",
+    "brics": {
+      "n_cuts": 2,
+      "feasibility": "やや困難 (特殊フラグメントを含む)",
+      "reactions": [
+        "C-N (複素環)",
+        "C-O (アルキル エーテル)",
+        "芳香環 C-C (Suzuki 等)"
+      ],
+      "fragments": [
+        {
+          "smiles": "CC",
+          "sa_score": 2.75,
+          "n_atoms": 2,
+          "buyable": true
+        },
+        {
+          "smiles": "C1CC[NH2+]C1",
+          "sa_score": 6.12,
+          "n_atoms": 5,
+          "buyable": false
+        },
+        {
+          "smiles": "c1ccc2[nH]ccc2c1",
+          "sa_score": 1.74,
+          "n_atoms": 9,
+          "buyable": true
+        }
+      ]
+    },
+    "recap": {
+      "tree_depth": 0,
+      "n_leaves": 1
+    }
+  },
+  {
+    "name": "benzene_tri_TRP_ALA_PRO",
+    "smiles": "CC1=CC2=CC2=CC=c2[nH]ccc2=C(C)C(C2CC[NH2+]C2)=C1",
+    "overall_feasibility": "合成可能 (AI 6 ステップ)",
+    "brics": {
+      "n_cuts": 0,
+      "feasibility": "やや困難 (特殊フラグメントを含む)",
+      "reactions": [],
+      "fragments": [
+        {
+          "smiles": "CC1=CC2=CC2=CC=c2[nH]ccc2=C(C)C(C2CC[NH2+]C2)=C1",
+          "sa_score": 5.58,
+          "n_atoms": 22,
+          "buyable": false
+        }
+      ]
+    },
+    "recap": {
+      "tree_depth": 0,
+      "n_leaves": 1
+    }
+  },
+  {
+    "name": "direct_link_TRP_ALA_direct",
+    "smiles": "CCc1cccc2[nH]ccc12",
+    "overall_feasibility": "容易 (AI ルートあり, 全原料市販品)",
+    "brics": {
+      "n_cuts": 1,
+      "feasibility": "市販品レベル (SA≤3.0, そのまま購入可能な可能性大)",
+      "reactions": [
+        "C-O (アルキル エーテル)",
+        "芳香環 C-C (Suzuki 等)"
+      ],
+      "fragments": [
+        {
+          "smiles": "CC",
+          "sa_score": 2.75,
+          "n_atoms": 2,
+          "buyable": true
+        },
+        {
+          "smiles": "c1ccc2[nH]ccc2c1",
+          "sa_score": 1.74,
+          "n_atoms": 9,
+          "buyable": true
+        }
+      ]
+    },
+    "recap": {
+      "tree_depth": 0,
+      "n_leaves": 1
+    }
+  },
+  {
+    "name": "reduced_peptide_TRP_ALA_PRO_C4",
+    "smiles": "CC1[NH2+]CCC1NC(=O)CCCCCCNC(=O)CCCCCCc1c(N)ccc2[nH]ccc12",
+    "overall_feasibility": "合成可能 (AI 8 ステップ)",
+    "brics": {
+      "n_cuts": 4,
+      "feasibility": "やや困難 (特殊フラグメントを含む)",
+      "reactions": [
+        "BRICS type (1, 4)",
+        "BRICS type (1, 8)",
+        "C-N (複素環)",
+        "アミド C-N",
+        "芳香環 C-C (Suzuki 等)"
+      ],
+      "fragments": [
+        {
+          "smiles": "CC1CCC[NH2+]1",
+          "sa_score": 5.96,
+          "n_atoms": 6,
+          "buyable": false
+        },
+        {
+          "smiles": "CCCCCCC=O",
+          "sa_score": 1.99,
+          "n_atoms": 8,
+          "buyable": true
+        },
+        {
+          "smiles": "Nc1ccc2[nH]ccc2c1",
+          "sa_score": 2.1,
+          "n_atoms": 10,
+          "buyable": true
+        },
+        {
+          "smiles": "N",
+          "sa_score": 6.67,
+          "n_atoms": 1,
+          "buyable": true
+        },
+        {
+          "smiles": "CCCCCCC=O",
+          "sa_score": 1.99,
+          "n_atoms": 8,
+          "buyable": true
+        }
+      ]
+    },
+    "recap": {
+      "tree_depth": 2,
+      "n_leaves": 3
+    }
+  }
+]
