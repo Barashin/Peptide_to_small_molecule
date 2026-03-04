@@ -114,7 +114,7 @@ python collect_best.py
 
 設計された候補分子のドッキングスコア (kcal/mol) の比較です。値が小さいほど結合が強いことを示します。
 
-![ドッキングスコア](docs/images/docking_scores.png)
+![ドッキングスコア](docs/images/docking_scores_updated.png)
 
 ### 上位 5 候補 (Result_Best)
 
