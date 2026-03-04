@@ -559,9 +559,23 @@ def plot_docking_scores(results: list[dict], output_path: str):
     ax.set_xlabel("|Affinity| (kcal/mol) — 右ほど強い結合", fontsize=11)
     ax.set_title("smina ドッキングスコア比較", fontsize=13, fontweight="bold")
 
-    for bar, s in zip(bars, scores[::-1]):
-        ax.text(bar.get_width() + 0.05, bar.get_y() + bar.get_height() / 2,
-                f"{s:.2f}", va="center", fontsize=9)
+    # テキストラベルの重なりを防ぐため、位置を調整
+    text_positions = []
+    for i, (bar, s) in enumerate(zip(bars, scores[::-1])):
+        y_center = bar.get_y() + bar.get_height() / 2
+        x_pos = bar.get_width() + 0.05
+
+        # 重なりを避けるための位置調整
+        adjusted_y = y_center
+        for prev_y in text_positions:
+            if abs(adjusted_y - prev_y) < 0.3:  # 重なりを検出
+                adjusted_y = prev_y + 0.4 if adjusted_y >= prev_y else prev_y - 0.4
+
+        text_positions.append(adjusted_y)
+
+        # 調整された位置にテキストを配置
+        ax.text(x_pos, adjusted_y, f"{s:.2f}", va="center", fontsize=9,
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="white", alpha=0.8))
 
     import matplotlib.patches as mpatches
     patches = [
