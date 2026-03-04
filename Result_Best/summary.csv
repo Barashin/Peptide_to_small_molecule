@@ -1,0 +1,6 @@
+rank,name,score,hac,le,le_grade,sa_score,qed,pains_ok,brenk_ok,conformance_rate,rotatable_between,retro_feasibility,retro_n_cuts,mw,logp,smiles,pair,source,out_sdf
+1,reduced_peptide_TRP_ALA_PRO_direct,-7.4,26,0.2846,△ 許容,3.99,0.4496,True,False,,,やや困難 (特殊試薬 or 多段階合成),4,,,CC1[NH2+]CCC1NC(=O)CCNC(=O)CCc1c(N)ccc2[nH]ccc12,TRP6-ALA7-ASP4,ペプチドミメティクス (STEP3),Result_Best/01_score7p4_reduced_peptide_TRP_ALA_PRO_direct.sdf
+2,direct_link_TRP_ALA_PRO,-6.1,16,0.3812,○ 良好,3.88,0.7808,True,True,,,やや困難 (特殊試薬 or 多段階合成),2,,,c1cc(CCC2CC[NH2+]C2)c2cc[nH]c2c1,TRP6-ALA7-ASP4,ペプチドミメティクス (STEP3),Result_Best/02_score6p1_direct_link_TRP_ALA_PRO.sdf
+3,benzene_tri_TRP_ALA_PRO,-6.1,22,0.2773,△ 許容,5.58,0.7818,True,True,,,市販品レベル (切断不要),0,,,CC1=CC2=CC2=CC=c2[nH]ccc2=C(C)C(C2CC[NH2+]C2)=C1,TRP6-ALA7-ASP4,ペプチドミメティクス (STEP3),Result_Best/03_score6p1_benzene_tri_TRP_ALA_PRO.sdf
+4,direct_link_TRP_ALA_direct,-6.0,11,0.5455,◎ 優秀,1.88,0.6347,True,True,,,"容易 (1-2 ステップ, 市販フラグメントの組み合わせ)",1,,,CCc1cccc2[nH]ccc12,TRP6-ALA7-ASP4,ペプチドミメティクス (STEP3),Result_Best/04_score6p0_direct_link_TRP_ALA_direct.sdf
+5,reduced_peptide_TRP_ALA_PRO_C4,-5.8,34,0.1706,✕ 非効率,3.92,0.2033,True,False,,,やや困難 (特殊試薬 or 多段階合成),4,,,CC1[NH2+]CCC1NC(=O)CCCCCCNC(=O)CCCCCCc1c(N)ccc2[nH]ccc12,TRP6-ALA7-ASP4,ペプチドミメティクス (STEP3),Result_Best/05_score5p8_reduced_peptide_TRP_ALA_PRO_C4.sdf
